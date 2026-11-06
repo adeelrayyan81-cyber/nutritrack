@@ -331,10 +331,21 @@
           const data = await N.aiPhoto(b64);
           const items = (data.items || []).map((it) => ({ it, f: N.matchFood(it.name) }));
           if (!items.length) { res.innerHTML = `<p class="muted">${esc(data.note || "No food found.")}</p>`; manualPick(res, true); return; }
-          for (const x of items) { if (!x.f) { try { const live = await N.fdcSearch(x.it.name, { branded: false, size: 3 }); x.f = live[0] || null; } catch (e) { } } }
+          for (const x of items) {
+            if (x.f) continue;
+            // try the AI's name, then simpler versions of it (e.g. "grilled lamb chop" -> "lamb chop" -> "lamb")
+            const words = N.norm(x.it.name).split(" ").filter((w) => w.length > 2);
+            const tries = [x.it.name, words.slice(-2).join(" "), words[0]].filter((q, i, a) => q && a.indexOf(q) === i);
+            for (const q of tries) {
+              try { const live = await N.fdcSearch(q, { branded: false, size: 3 }); if (live[0]) { x.f = live[0]; break; } }
+              catch (e) { x.err = e.message; break; }
+            }
+          }
           res.innerHTML = `<h3 style="margin-bottom:10px">Here's what I see</h3>` + items.map((x, i) => x.f ? `
-            <div class="result" style="cursor:default"><input type="checkbox" checked data-c="${i}" aria-label="Include ${esc(x.f.name)}" style="width:20px;height:20px"><div class="grow"><b>${esc(x.f.name)}</b><small>AI saw "${esc(x.it.name)}" · USDA values</small></div><input class="input" style="width:90px" type="number" value="${r0(x.it.grams || x.f.sg)}" data-g="${i}" aria-label="Grams"> g</div>` : `<p class="muted">Couldn't match "${esc(x.it.name)}" to USDA data.</p>`).join("") +
+            <div class="result" style="cursor:default"><input type="checkbox" checked data-c="${i}" aria-label="Include ${esc(x.f.name)}" style="width:20px;height:20px"><div class="grow"><b>${esc(x.f.name)}</b><small>AI saw "${esc(x.it.name)}" · USDA values</small></div><input class="input" style="width:90px" type="number" value="${r0(x.it.grams || x.f.sg)}" data-g="${i}" aria-label="Grams"> g</div>` : `<div class="result" style="cursor:default"><div class="grow"><b>${esc(N.titleCase(x.it.name))}</b><small>${x.err ? esc(x.err) : "No automatic USDA match. Search to pick the closest one."}</small></div><button class="btn sm primary" data-q="${esc(x.it.name)}">${I("search")}Search</button></div>`).join("") +
             `<div class="row" style="margin-top:12px;gap:10px"><select class="input" id="phMeal">${mealOptions().map(([v, l]) => `<option value="${v}" ${v === defaultMeal() ? "selected" : ""}>${l}</option>`).join("")}</select><button class="btn primary" id="phLog">${I("plus")}Log selected</button></div><p class="src" style="margin-top:8px">Portion sizes are AI estimates. Adjust the grams if needed.</p>`;
+          $$("[data-q]", res).forEach((b) => b.onclick = () => openAddFood({ q: b.dataset.q }));
+          if (!items.some((x) => x.f)) $("#phLog", res).disabled = true;
           $("#phLog", res).onclick = () => {
             const meal = $("#phMeal", res).value; let n = 0;
             items.forEach((x, i) => { const c = $(`[data-c="${i}"]`, res); if (x.f && c && c.checked) { S.log.push(N.itemFromFood(x.f, +$(`[data-g="${i}"]`, res).value || x.f.sg, meal, x.f.fdcId ? "USDA FoodData Central #" + x.f.fdcId + " · photo" : "USDA values · photo")); n++; } });
